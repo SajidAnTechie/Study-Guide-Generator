@@ -1,4 +1,4 @@
-# Study Guide Creator
+# Study Guide Generator
 
 ## Project Description
 
@@ -94,9 +94,9 @@ Study Guide Generator is a web application that empowers users to upload textboo
 *[Add screenshots here]*
 
 - Main upload interface
+![Home page](https://raw.githubusercontent.com/SajidAnTechie/Study-Guide-Generator/c5c793e54e84ee0a751722d0e06c611875d6800d/Full%20image.png)
 - Generated study guide example
-- Flashcard view
-- Quiz interface
+![Example](https://raw.githubusercontent.com/SajidAnTechie/Study-Guide-Generator/52868c9515706bfdf1a0be2ce3340d759f9c4130/Example.png)
 
 ## Contributing
 

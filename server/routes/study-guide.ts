@@ -1,8 +1,8 @@
-import { RequestHandler } from "express";
-import multer from "multer";
-import OpenAI from "openai";
-import { createWorker } from "tesseract.js";
 import fs from "fs";
+import multer from "multer";
+import { RequestHandler } from "express";
+import { createWorker } from "tesseract.js";
+import { RAGService } from "../langchain/ragService";
 
 // Configure multer for file uploads
 const upload = multer({
@@ -105,67 +105,20 @@ async function parseFileContent(file: Express.Multer.File): Promise<string> {
   }
 }
 
-// Generate study guide prompts based on type
-function getPromptForType(type: string, content: string): string {
-  const basePrompt = `Based on the following content, generate a well-structured ${type}:
-
-Content:
-${content}
-
-`;
-
-  switch (type) {
-    case 'summary':
-      return basePrompt + `Please provide a comprehensive but concise summary that captures the main ideas, key concepts, and important details. The summary should be well-organized and easy to understand.`;
-
-    case 'points':
-      return basePrompt + `Please create a bullet-point list of the most important key ideas and concepts. Each point should be clear, concise, and capture essential information. Format each point on a new line starting with a bullet or dash.`;
-
-    case 'flashcards':
-      return basePrompt + `Please create flashcards in a question and answer format. Each flashcard should test understanding of key concepts. Format each flashcard as:
-
-Question: [Question here]
-Answer: [Answer here]
-
-Separate each flashcard with a blank line. Create 10-15 flashcards covering the most important topics.`;
-
-    case 'quiz':
-      return basePrompt + `Please create a comprehensive quiz with multiple-choice and short-answer questions. Include:
-
-1. Multiple choice questions (with 4 options each, indicate correct answer)
-2. Short answer questions
-3. True/False questions
-
-Make sure to cover all major topics and concepts. Format questions clearly and provide variety in question types.`;
-
-    case 'outline':
-      return basePrompt + `Please create a detailed hierarchical outline that organizes the content into logical sections and subsections. Use proper formatting with:
-
-I. Major topics
-   A. Subtopics
-      1. Key points
-         a. Supporting details
-
-The outline should capture the structure and flow of the material comprehensively.`;
-
-    default:
-      return basePrompt + `Please organize and present this information in a clear, educational format.`;
-  }
-}
-
 export const handleStudyGuideGeneration: RequestHandler = async (req, res) => {
   console.log('Study guide generation request received');
 
   try {
     const { type } = req.body;
-    const apiKey = req.body.apiKey || process.env.VITE_OPENAI_API_KEY;
+    const apiKey = req.body.apiKey || process.env.VITE_OPENAI_API_KEY_1;
+    const model = process.env.VITE_OPENAI_MODEL || 'gpt-4.1-nano';
     const file = req.file;
 
     console.log('Request details:', {
       type,
       hasFile: !!file,
       hasApiKey: !!apiKey,
-      filename: file?.originalname
+      filename: file?.originalname,
     });
 
     if (!file) {
@@ -203,73 +156,21 @@ export const handleStudyGuideGeneration: RequestHandler = async (req, res) => {
       });
     }
 
-    // Truncate content if too long (to avoid token limits)
-    const maxLength = 12000; // Conservative limit for GPT context
-    if (content.length > maxLength) {
-      content = content.substring(0, maxLength) + "\n\n[Content truncated due to length...]";
+    let generatedContent: string;
+    let ragService: RAGService | null = null;
+
+    console.log(`Initializing RAG with model: ${model}`);
+    ragService = new RAGService(apiKey, model);
+
+    if (!ragService) {
+      throw new Error('Failed to initialize RAG service');
     }
 
-    // Initialize OpenAI with provided API key
-    console.log('Initializing OpenAI client...');
-    const openai = new OpenAI({
-      apiKey: apiKey,
+    // Generate using RAG
+    generatedContent = await ragService.generateWithRAG(content, type, {
+      filename: file.originalname,
+      uploadedAt: Date.now(),
     });
-
-    // Generate study guide using OpenAI
-    console.log('Generating prompt for type:', type);
-    const prompt = getPromptForType(type, content);
-    console.log('Prompt length:', prompt.length);
-
-    console.log('Calling OpenAI API...');
-
-    // Try multiple models in order of preference
-    let completion;
-    const models = ["gpt-4.1-nano-2025-04-14", "gpt-4o-mini", "gpt-3.5-turbo", "gpt-4o"];
-    let lastError;
-
-    for (const model of models) {
-      try {
-        console.log(`Trying model: ${model}`);
-        completion = await openai.chat.completions.create({
-          model: model,
-          messages: [
-            {
-              role: "system",
-              content: "You are an expert educational assistant that creates high-quality study materials. Your responses should be well-formatted, accurate, and pedagogically sound."
-            },
-            {
-              role: "user",
-              content: prompt
-            }
-          ],
-          max_tokens: 2000,
-          temperature: 0.7,
-        });
-        console.log(`Successfully used model: ${model}`);
-        break; // If successful, break out of the loop
-      } catch (modelError: any) {
-        console.log(`Model ${model} failed:`, modelError.message);
-        lastError = modelError;
-        if (modelError.status !== 403 && modelError.code !== 'model_not_found') {
-          // If it's not a model access issue, throw immediately
-          throw modelError;
-        }
-        // Continue to next model if it's a model access issue
-      }
-    }
-
-    // If all models failed, throw the last error
-    if (!completion) {
-      throw lastError || new Error('All models failed');
-    }
-
-    console.log('OpenAI API call completed successfully');
-    const generatedContent = completion.choices[0]?.message?.content;
-
-    if (!generatedContent) {
-      console.log('Error: No content generated by OpenAI');
-      return res.status(500).json({ error: 'Failed to generate study guide content' });
-    }
 
     console.log('Study guide generated successfully, content length:', generatedContent.length);
 
@@ -279,7 +180,6 @@ export const handleStudyGuideGeneration: RequestHandler = async (req, res) => {
       content: generatedContent,
       type: type,
       filename: file.originalname,
-      usage: completion.usage
     });
 
   } catch (error: any) {

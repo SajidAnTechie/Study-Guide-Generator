@@ -1,6 +1,6 @@
 import "dotenv/config";
-import express from "express";
 import cors from "cors";
+import express from "express";
 import { handleDemo } from "./routes/demo";
 import { handleStudyGuideGeneration, uploadMiddleware } from "./routes/study-guide";
 
